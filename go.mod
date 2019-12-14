@@ -1,4 +1,4 @@
-module rabbitmq
+module github.com/vosonwang/rabbitmq
 
 go 1.13
 
