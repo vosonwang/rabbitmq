@@ -1,7 +1,7 @@
 ## RabbitMQ
 
 这个库是对github.com/streadway/amqp的轻量化封装，提供了以下几个功能：
-1. 断线重连（默认3次）
+1. 断线重连
 2. channel池
 
 ## 最佳实践
@@ -11,9 +11,10 @@
 3. 不要在线程之间共享Channel，因为大部分客户端的Channels都不是线程安全的（因为会影响性能）。
 
 ## 说明
-使用了[Go Commons Pool](https://github.com/jolestar/go-commons-pool)创建channel池
+1. 使用了[Go Commons Pool](https://github.com/jolestar/go-commons-pool)创建channel池
+2. 消息发送失败不会重发，因为那样就必然要封装amqp的QueueDeclare等方法
 
 ## 文献
 感谢🙏：
-[Hurricanezwf](https://github.com/Hurricanezwf/rabbitmq-go)
-[OhBonsai](https://www.jianshu.com/p/da8c18bc3455)
+1. [Hurricanezwf](https://github.com/Hurricanezwf/rabbitmq-go)
+2. [OhBonsai](https://www.jianshu.com/p/da8c18bc3455)
