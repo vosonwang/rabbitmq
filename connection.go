@@ -122,3 +122,12 @@ func (c *Connection) ReturnChannel(obj interface{}) error {
 	}
 	return nil
 }
+
+func (c *Connection) InvalidateObject(obj interface{}) error {
+	err := c.pool.InvalidateObject(c.ctx, obj)
+	if err != nil {
+		log.Error("剔除Channel失败！")
+		return err
+	}
+	return nil
+}
