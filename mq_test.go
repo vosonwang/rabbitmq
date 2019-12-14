@@ -3,7 +3,6 @@ package rabbitmq
 import (
 	"github.com/labstack/gommon/log"
 	"github.com/streadway/amqp"
-	"sync"
 	"testing"
 	"time"
 )
@@ -23,72 +22,64 @@ const (
 var url = "amqp://ricnsmart:9ef16689fdaf@dev.ricnsmart.com:5672/"
 
 func TestPublish(t *testing.T) {
-	mq := New(url)
-	if err := mq.Open(); err != nil {
+	c := New(url)
+	if err := c.Open(); err != nil {
 		log.Fatal(err)
 	}
-	var s sync.WaitGroup
-	s.Add(1)
+	forever := make(chan byte)
 	go func() {
-		ch, err := mq.Channel()
-		if err != nil {
-			log.Error("获取Channel失败！", err)
-			err = mq.InvalidateChannel(ch)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Fatal(err)
-		}
-		q, err := ch.QueueDeclare(
-			"test",
-			false,
-			true,
-			false,
-			false,
-			nil,
-		)
-		if err != nil {
-			log.Errorf(`%v,%v`, declareQueueFailed, err)
-			err = mq.InvalidateChannel(ch)
-			if err != nil {
-				log.Fatal(err)
-			}
-			return
-		}
-		for i := 0; i < 10; i++ {
-			err = ch.Publish(
-				"",
-				q.Name,
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "text/plain",
-					Body:        []byte{1, 2, 3},
-				})
-			if err != nil {
-				log.Errorf(`%v,%v`, publishMessageFailed, err)
-				err = mq.InvalidateChannel(ch)
-				if err != nil {
-					log.Fatal(err)
-				}
-			}
-			time.Sleep(2 * time.Second)
-		}
-		err = mq.ReturnChannel(ch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		s.Done()
-	}()
-	s.Add(1)
-	go func() {
-		for i := 0; i < 3; i++ {
-			log.Infof("第%v次重试", i)
-			ch, err := mq.Channel()
+		for {
+			obj, err := c.Channel()
 			if err != nil {
 				log.Error("获取Channel失败！", err)
 				continue
 			}
+			ch := obj.(*amqp.Channel)
+			_, err = ch.QueueDeclare(
+				"test",
+				false,
+				true,
+				false,
+				false,
+				nil,
+			)
+			if err != nil {
+				log.Errorf(`%v,%v`, declareQueueFailed, err)
+				continue
+			}
+			for i := 0; i < 10; i++ {
+				err = ch.Publish(
+					"",
+					"test",
+					false,
+					false,
+					amqp.Publishing{
+						ContentType: "text/plain",
+						Body:        []byte{1, 2, 3},
+					})
+				if err != nil {
+					log.Errorf(`%v,%v`, publishMessageFailed, err)
+					break
+				}
+				time.Sleep(2 * time.Second)
+			}
+			err = c.ReturnChannel(obj)
+			if err != nil {
+				log.Error(err)
+				continue
+			}
+		}
+	}()
+
+	go func() {
+		for i := 0; i < 3; i++ {
+			log.Infof("第%v次重试", i)
+			obj, err := c.Channel()
+			if err != nil {
+				log.Error("获取Channel失败！", err)
+				continue
+			}
+			ch := obj.(*amqp.Channel)
 			q, err := ch.QueueDeclare(
 				"test",
 				false,
@@ -113,47 +104,36 @@ func TestPublish(t *testing.T) {
 					})
 				if err != nil {
 					log.Errorf(`%v,%v`, publishMessageFailed, err)
-					continue
+					break
 				}
 				time.Sleep(2 * time.Second)
 			}
-			err = mq.ReturnChannel(ch)
+			err = c.ReturnChannel(obj)
 			if err != nil {
 				log.Fatal(err)
 			}
 		}
-		mq.Close()
-		s.Done()
+		c.Close()
 	}()
-	s.Wait()
+	<-forever
 
 }
 
 func TestConsume(t *testing.T) {
 	forever := make(chan byte)
 	go func() {
-		for {
-			time.Sleep(10 * time.Hour)
-		}
-	}()
-	go func() {
-		mq := New(url)
-		if err := mq.Open(); err != nil {
+		c := New(url)
+		if err := c.Open(); err != nil {
 			log.Fatal(err)
 		}
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 10; i++ {
 			log.Infof("第%v次重试", i)
-			ch, err := mq.Channel()
+			obj, err := c.Channel()
 			if err != nil {
 				log.Error("获取Channel失败！", err)
-				err = mq.InvalidateChannel(ch)
-				if err != nil {
-					log.Error(err)
-					continue
-				}
-				log.Error(err)
 				continue
 			}
+			ch := obj.(*amqp.Channel)
 			q, err := ch.QueueDeclare(
 				"test",
 				false,
@@ -164,11 +144,6 @@ func TestConsume(t *testing.T) {
 			)
 			if err != nil {
 				log.Errorf(`%v,%v`, declareQueueFailed, err)
-				err = mq.InvalidateChannel(ch)
-				if err != nil {
-					log.Error(err)
-					continue
-				}
 				return
 			}
 			msgs, err := ch.Consume(
@@ -181,11 +156,6 @@ func TestConsume(t *testing.T) {
 				nil)
 			if err != nil {
 				log.Errorf(`%v,%v`, publishMessageFailed, err)
-				err = mq.InvalidateChannel(ch)
-				if err != nil {
-					log.Error(err)
-					continue
-				}
 				continue
 			}
 
@@ -193,7 +163,6 @@ func TestConsume(t *testing.T) {
 				log.Info(msg.Body)
 			}
 		}
-
 	}()
 	<-forever
 }
