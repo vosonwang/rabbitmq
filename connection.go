@@ -10,10 +10,12 @@ import (
 )
 
 const (
-	maxRetry       = 1000
+	maxRetry       = 10
 	reconnectDelay = 5 * time.Second // 连接断开后多久重连
 	borrowFailed   = "Failed to borrow from pool"
 )
+
+var ReconnectFailed = errors.New("try to reconnect to RabbitMQ failed")
 
 type Connection struct {
 	url        string
@@ -23,10 +25,6 @@ type Connection struct {
 	pool       *pool.ObjectPool
 	ctx        context.Context
 	connNotify chan *amqp.Error // connection监听器
-}
-
-func init() {
-	log.SetPrefix("RabbitMQ")
 }
 
 func New(url string) *Connection {
@@ -83,7 +81,7 @@ func (c *Connection) keepAlive() {
 			log.Info("Connection recover OK.")
 			return
 		}
-		// 此时mq彻底失效
+		// 此时连接彻底失效
 		log.Errorf("Try to reconnect to RabbitMQ failed over maxRetry(%d), so exit.", maxRetry)
 		close(c.stopChan)
 	}
@@ -97,7 +95,7 @@ func (c *Connection) Channel() (interface{}, error) {
 	for {
 		select {
 		case <-c.stopChan:
-			return nil, errors.New("重连失败！")
+			return nil, ReconnectFailed
 		default:
 			// 判断Channel池是否处于关闭状态，如果是，继续重试，如果否，可能是只是channel被关闭
 			if !c.pool.IsClosed() {
@@ -109,12 +107,16 @@ func (c *Connection) Channel() (interface{}, error) {
 				}
 				return obj, nil
 			}
+			log.Error("Channel池已关闭")
 		}
 		time.Sleep(reconnectDelay)
 	}
 }
 
 func (c *Connection) ReturnChannel(obj interface{}) error {
+	if c.pool.IsClosed() {
+		return errors.New("当前channel池已关闭")
+	}
 	err := c.pool.ReturnObject(c.ctx, obj)
 	if err != nil {
 		log.Error("归还Channel失败！")
@@ -124,6 +126,9 @@ func (c *Connection) ReturnChannel(obj interface{}) error {
 }
 
 func (c *Connection) InvalidateObject(obj interface{}) error {
+	if c.pool.IsClosed() {
+		return errors.New("当前channel池已关闭")
+	}
 	err := c.pool.InvalidateObject(c.ctx, obj)
 	if err != nil {
 		log.Error("剔除Channel失败！")
